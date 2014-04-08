@@ -28,12 +28,20 @@ public class WorkerThread extends Thread {
 	@Override
 	public void run() {
 		// convert the rxPacket's payload to a string
-		String payload = new String(rxPacket.getData(), 0, rxPacket.getLength())
+		String payloadwithAck = new String(rxPacket.getData(), 0, rxPacket.getLength())
 		.trim();
-		System.out.println(payload);
+		System.out.println(payloadwithAck);
 
 
 		// dispatch request handler functions based on the payload's prefix
+		String[] params = payloadwithAck.split(",");
+		String payload = payloadwithAck;
+		if(parseable(params[0])){
+			System.out.println("can ack");
+			acknowlege(params[0]);
+			payload = payloadwithAck.replaceFirst(params[0]+",","");
+		}
+		System.out.println(payload);
 
 		if (payload.startsWith("REGISTER")) {
 			onRegisterRequested(payload);
@@ -85,11 +93,11 @@ public class WorkerThread extends Thread {
 			onACKReceived(payload);
 			return;
 		}
-
 		// if we got here, it must have been a bad request, so we tell the
 		// client about it
 		onBadRequest(payload);
 	}
+
 
 	private void onListMyGroupsRequested(String payload) {
 		String[] params= payload.split(",");
@@ -153,7 +161,8 @@ public class WorkerThread extends Thread {
 				reply = "+ERROR,invalid ClientID, recheck";
 			}
 			else
-			{
+			{	
+				updateEndPoint(user);
 				reply = "+SUCESS\n";
 				if(params.length>3)
 				{
@@ -203,14 +212,8 @@ public class WorkerThread extends Thread {
 			else {
 				reply ="+ERROR,unknown ACKid\n";
 			}
-			try
-			{
-				
-				send(reply,this.rxPacket.getAddress(),this.rxPacket.getPort());
-			}catch(IOException e)
-			{
-				e.printStackTrace();
-			}
+			System.out.println(reply);
+			//send(reply,this.rxPacket.getAddress(),this.rxPacket.getPort());
 		}
 
 	}
@@ -244,7 +247,11 @@ public class WorkerThread extends Thread {
 		}
 		else{
 			user = Server.clients.get(params[1]);
-			if (user ==null)
+			if( user != null)
+			{
+				updateEndPoint(user);
+			}
+			if (user == null)
 			{
 				reply = "+ERROR,invalid ClientID, recheck";
 			}
@@ -320,6 +327,10 @@ public class WorkerThread extends Thread {
 		}
 		else{
 			user = Server.clients.get(params[1]);
+			if( user != null)
+			{
+				updateEndPoint(user);
+			}
 			if (user ==null)
 			{
 				reply = "+ERROR,invalid ClientID, recheck";
@@ -336,12 +347,12 @@ public class WorkerThread extends Thread {
 					int maxMembers = Integer.parseInt(params[3]);
 					if(Server.addClientToGroup(groupName, user , maxMembers))
 					{
-						reply= "+SUCCESS";
+						reply= "+SUCCESS,joined group " + groupName;
 						if(groupName.startsWith("waiting"))
-								{
-									//helper pairer function 
-									pair();
-								}
+						{
+							//helper pairer function 
+							pair();
+						}
 					}
 					else
 					{
@@ -354,6 +365,11 @@ public class WorkerThread extends Thread {
 					if(Server.addClientToGroup(groupName,user))
 					{
 						reply= "+SUCCESS,joined group " + groupName;
+						if(groupName.startsWith("waiting"))
+						{
+							//helper pairer function 
+							pair();
+						}
 					}
 					else
 					{
@@ -368,6 +384,40 @@ public class WorkerThread extends Thread {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+
+	}
+
+	private boolean parseable(String ackid){
+		boolean canParse= true;
+		try{
+			Long.parseLong(ackid);
+
+		}catch(NumberFormatException e){
+			canParse = false;
+		}
+		return canParse;
+	}
+
+	private void acknowlege(String ackid)
+	{
+		try {
+			send("ACK,"+ackid,this.rxPacket.getAddress(),this.rxPacket.getPort());
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+	private void updateEndPoint(User user){
+		// get the address of the sender from the rxPacket
+		InetAddress address = this.rxPacket.getAddress();
+		// get the port of the sender from the rxPacket
+		int port = this.rxPacket.getPort();
+		//endpoint has changed
+		if(!user.endpoint.address.equals(address) || (user.endpoint.port != port))
+		{
+			user.endpoint = new ClientEndPoint(address, port);
+		}
+
 
 	}
 
@@ -389,21 +439,21 @@ public class WorkerThread extends Thread {
 				player2 = user;
 				break;
 			}
-			
+
 			String groupName = "game_"+Server.gameID.incrementAndGet();
-				if(player1 != null && player2 != null && Server.addClientToGroup(groupName,player1)
-				&& Server.addClientToGroup(groupName, player2))
-				{
-					groupX.removeMember(player1);
-					groupO.removeMember(player2);
-					try{
-						send(groupName, player1);
-						send(groupName, player2);
-					} catch (IOException e) {
-						e.printStackTrace();
-					}
+			if(player1 != null && player2 != null && !player1.equals(player2) && Server.addClientToGroup(groupName,player1)
+					&& Server.addClientToGroup(groupName, player2))
+			{
+				groupX.removeMember(player1);
+				groupO.removeMember(player2);
+				try{
+					send(groupName, player2);
+					send(groupName, player1);
+				} catch (IOException e) {
+					e.printStackTrace();
 				}
-				
+			}
+
 		}
 	}
 
@@ -420,6 +470,10 @@ public class WorkerThread extends Thread {
 		}
 		else{
 			user = Server.clients.get(params[1]);
+			if( user != null)
+			{
+				updateEndPoint(user);
+			}
 			if (user ==null)
 			{
 				reply = "+ERROR,invalid ClientID, recheck";
@@ -470,7 +524,11 @@ public class WorkerThread extends Thread {
 		else
 		{
 			user = Server.clients.get(params[1]);
-			if (user ==null)
+			if(user != null)
+			{
+				updateEndPoint(user);
+			}
+			if (user == null)
 			{
 				reply = "+ERROR,invalid ClientID, recheck";
 			}
@@ -509,6 +567,9 @@ public class WorkerThread extends Thread {
 			List<String> messages = Server.messageQueue.get(params[1]);
 			user = Server.clients.get(params[1]);
 			if (user!=null && messages!= null) {
+
+				updateEndPoint(user);
+
 				for (String message: messages) {
 
 					try{
@@ -542,22 +603,28 @@ public class WorkerThread extends Thread {
 
 
 	// send a string, wrapped in a UDP packet, to the specified remote endpoint
-	public void send(String payload, InetAddress address, int port)
-			throws IOException {
+	public void send(String payload, InetAddress address, int port) throws IOException{
 		System.out.println(payload);
 		DatagramPacket txPacket = new DatagramPacket(payload.getBytes(),
 				payload.length(), address, port);
-		this.socket.send(txPacket);
+		try {
+			this.socket.send(txPacket);
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			throw e;
+		}
 	}
 
 	// send a string, wrapped in a UDP packet, to the specified user every 10 seconds until acknowledged
 	public void send(final String payload, final User user) throws IOException {
 		if(user != null)
 		{
-			System.out.println(payload);
+			
 			String ackID = "" + user.getID()  + ":" + user.currentReqID.incrementAndGet();
 			// Append the ID + reuestID to the beginning of the payload
 			final String sendPayload = ackID + "," + payload +"\n";
+			System.out.println(sendPayload);
 			ScheduledExecutorService executor = Executors
 					.newSingleThreadScheduledExecutor();
 			Runnable sendTask = new Runnable() {
@@ -584,7 +651,7 @@ public class WorkerThread extends Thread {
 		}	
 		else{
 			//not a user yet //no ack mechanism
-			send(payload+"\n",this.rxPacket.getAddress(),this.rxPacket.getPort());
+			send(payload,this.rxPacket.getAddress(),this.rxPacket.getPort());
 		}
 	}
 
